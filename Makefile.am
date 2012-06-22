@@ -25,11 +25,19 @@ EXTRA_DIST = LICENSE \
 	     bootstrap
 
 # Library
-lib_LTLIBRARIES = pam_myproxy.la
+securelibdir = @SECUREDIR@
+
+securelib_LTLIBRARIES = pam_myproxy.la
 pam_myproxy_la_LDFLAGS = -module -avoid-version
-pam_myproxy_la_SOURCES = myproxy_ssl_utils.c myproxy_ssl_utils.h 
+pam_myproxy_la_SOURCES = \
+    pam_myproxy.h pam_myproxy_opts.c \
+    myproxy_client.c myproxy_client.h \
+    pam_myproxy.c
 
 # Test program
 sbin_PROGRAMS = myproxy_test_client
 myproxy_test_client_CFLAGS = -DMAKE_A_OUT
-myproxy_test_client_SOURCES = myproxy_ssl_utils.c myproxy_ssl_utils.h client.c
+myproxy_test_client_SOURCES = \
+    pam_myproxy.h pam_myproxy_opts.c \
+    myproxy_client.c myproxy_client.h \
+    testclient.c
