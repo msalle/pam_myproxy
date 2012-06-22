@@ -1,10 +1,42 @@
 This software is designed for GNU/Linux with glibc 2.1 or later.
 
-Summary:      
+Summary:      PAM module to obtain a proxy delegation from a myproxy store.
 Author:       Mischa Sall\'e, msalle (at) nikhef (dot) nl
 License:      Apache 2
 Dependencies: OpenSSL
 
-Description:  
+Description:  Provides a PAM module that can obtain a proxy delegation from a
+	      MyProxy service. The user should store his credentials using
+	      his/her DN as username and a password. The PAM module will ask for
+	      the MyProxy password and either store a proxy delegation plus
+	      private key in memory for a next PAM module, or write it to disk
+	      as PEM file.
+	      This PEM file can be used to do actual authentication via e.g.
+	      LCMAPS with the planned pam_lcmapsd module.
+	      Options can be given either on the pam commandline or in a config
+	      file which can be specified on the pam commandline.
+	      Valid options:
+	        config      - only on commandline: specifies path of config file
+	        cafile	    - as understood by openssl
+		capath      - idem
+		hostcert    - idem (corresponding to clientcert)
+		hostkey     - idem
+		myproxyhost - MyProxy service hostaddress
+		myproxyport - MyProxy service port (default 7512)
+		proxyfmt    - formatstring for proxy filename, a %d is
+		              replaced by the active username, it should end
+			      with XXXXXX following mkstemp()
+			      (default /tmp/x509up_XXXXXX)
+		writeproxy  - 0 don't write proxy, non-zero write proxy
+		              (default 1)
+		lifetime    - proxy lifetime in seconds (should be less than 1
+		              billion, default 43200L)
+		keysize     - bitsize of keys (default 2048)
+	      The pam module only provides pam_sm_authenticate and
+	      pam_sm_setcred. The latter sets a X509_USER_PROXY env variable
+	      pointing to the proxy file (in case the proxy is written to file).
+
+Example:      E.g.:
+                auth     optional     pam_myproxy.so config=/etc/security/pam_myproxy.conf myproxyhost=px.grid.sara.nl
 		
-Notes:        
+Notes:        Actual authentication needs to be done by another pam module.
