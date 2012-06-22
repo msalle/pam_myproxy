@@ -236,6 +236,8 @@ static void _init_opts_struct(pam_myproxy_opts_t *opts)	{
  * \param opts struct containing the configuration options
  */
 void _pam_myproxy_config_free(pam_myproxy_opts_t *opts) {
+    free(opts->conffile);		opts->conffile=NULL;
+
     free(opts->certinfo.capath);	opts->certinfo.capath=NULL;
     free(opts->certinfo.cafile);	opts->certinfo.cafile=NULL;
     free(opts->certinfo.clientcert);	opts->certinfo.clientcert=NULL;
