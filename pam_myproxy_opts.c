@@ -355,7 +355,7 @@ int _pam_myproxy_parse_cmdline(int argc, const char *argv[],
 	    free(val);
 	}
 	else if (strcmp(opt,"lifetime")==0) {
-	    if (sscanf(val,"%d",&longval)!=1)	{
+	    if (sscanf(val,"%ld",&longval)!=1)	{
 		free(val); free(opt);
 		return i+1;
 	    }
