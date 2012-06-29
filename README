@@ -17,8 +17,8 @@ Description:  Provides a PAM module that can obtain a proxy delegation from a
 	      file which can be specified on the pam commandline.
 	      Valid options:
 	        config      - only on commandline: specifies path of config file
-	        cafile	    - as understood by openssl
-		capath      - idem
+		capath      - as understood by openssl
+	        cafile	    - idem
 		hostcert    - idem (corresponding to clientcert)
 		hostkey     - idem
 		myproxyhost - MyProxy service hostaddress
@@ -32,6 +32,9 @@ Description:  Provides a PAM module that can obtain a proxy delegation from a
 		lifetime    - proxy lifetime in seconds (should be less than 1
 		              billion, default 43200L)
 		keysize     - bitsize of keys (default 2048)
+		intern_env  - whether to use the pam environment to pass data
+		              from pam_sm_authenticate to pam_sm_setcred.
+			      Typically needed for sshd.
 	      The pam module only provides pam_sm_authenticate and
 	      pam_sm_setcred. The latter sets a X509_USER_PROXY env variable
 	      pointing to the proxy file (in case the proxy is written to file).

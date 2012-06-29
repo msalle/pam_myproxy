@@ -32,13 +32,6 @@
  */
 #define PAM_SM_AUTH
 
-/**
- * In order to move data from pam_sm_authenticate to pam_sm_setcred we have to
- * use the pam environment as pam_set_data works only per function. This
- * variable is set by auth and reset (after readout) by pam_sm_setcred
- */
-#define PAM_MYPROXY_ENVVAR	"PAM_MYPROXY_ENV_X509_USER_PROXY"
-
 /** Prompt when obtaining password */
 #define PAM_MYPROXY_PW_PROMPT	"MyProxy password: "
 
@@ -278,9 +271,8 @@ static int _parse_myproxy_returncode(pam_handle_t *pamh,
  * In the former case it is stored as ENV_PKEY and STACK_OF(X509) in pam data
  * with names DATA_PROXY_KEY and DATA_PROXY_CHAIN, in the latter case it is
  * stored in a file with name cred->filename, which is constructed from
- * opts->proxyname; the name is stored in pam data with name
- * DATA_PROXY_FILENAME. The name is also stored in environment variable
- * PAM_MYPROXY_ENVVAR such that pam_sm_setcred can reach it.
+ * opts->proxyfmt; the name is stored in pam data with name
+ * DATA_PROXY_FILENAME.
  * \param pamh pam handle
  * \param opts configuration options
  * \param cred credentials, including the name of the proxy file, contents will
@@ -290,6 +282,7 @@ static int _parse_myproxy_returncode(pam_handle_t *pamh,
 static int _store_proxy(pam_handle_t *pamh, pam_myproxy_opts_t *opts,
 			cred_t *cred) {
     int rc,len;
+    char *proxy_buf=NULL;
     char *buffer=NULL;
 
     /* Write when writeproxy is non-zero */
@@ -297,7 +290,8 @@ static int _store_proxy(pam_handle_t *pamh, pam_myproxy_opts_t *opts,
 	/* Use filebased: write to file, store filename as a pam data element
 	 * for other modules and put in environment. Then free chain and private
 	 * key */
-	if ( (rc=_myproxy_write_proxy(opts->proxyname, cred))!=0)   {
+	/* Write proxy */
+	if ( (rc=_myproxy_write_proxy(opts->proxyfmt, cred))!=0)   {
 	    if (cred->proxyfile)
 		pam_syslog(pamh, LOG_WARNING,
 		       "Failed to write proxy %s\n",
@@ -305,56 +299,54 @@ static int _store_proxy(pam_handle_t *pamh, pam_myproxy_opts_t *opts,
 	    else
 		pam_syslog(pamh, LOG_WARNING,
 		       "Failed to write proxy\n");
-	    rc=PAM_AUTHINFO_UNAVAIL;
-	} else if ( (rc=pam_set_data(pamh, DATA_PROXY_FILENAME,
-				  (void *)cred->proxyfile,
-				  _pam_string_cleanup))!=PAM_SUCCESS)    {
-	    pam_syslog(pamh, LOG_ERR,
-		"Failed to pam_set_data proxy filename: %s\n",
-		pam_strerror(pamh,rc));
-	    rc=PAM_AUTHINFO_UNAVAIL;
-	} else { /* Successfully written and stored as pam data: set env
-		    variable to pass it to setcred, which will retrieve it and
-		    unset it from the env */
-	    len=2+strlen(PAM_MYPROXY_ENVVAR)+strlen(cred->proxyfile);
-	    if ( (buffer=malloc(len))==NULL )
-		rc=PAM_AUTHINFO_UNAVAIL;
-	    else {
-		snprintf(buffer,len,"%s=%s",PAM_MYPROXY_ENVVAR,cred->proxyfile);
-		if ( (rc=pam_putenv(pamh, buffer)) != PAM_SUCCESS ) {
-		    free(buffer);
-		    pam_syslog(pamh, LOG_ERR,
-			"Failed to set PAM_MYPROXY_ENVVAR: %s\n",
-			pam_strerror(pamh,rc));
-		    rc=PAM_AUTHINFO_UNAVAIL;
-		}
-	    }
+	    return PAM_AUTHINFO_UNAVAIL;
 	}
-	/* We're done with the credentials as we have it on disk now */
-	_myproxy_free_cred(cred);
+	/* Duplicate buffer */
+	if ( (proxy_buf=strdup(cred->proxyfile))==NULL ) {
+	    pam_syslog(pamh,LOG_ERR,"Out of memory\n");
+	    return PAM_AUTHINFO_UNAVAIL;
+	}
+	/* Store in pam data */
+	if ( (rc=pam_set_data(pamh, PAM_PROXY_FILENAME, proxy_buf,
+			      _pam_string_cleanup))!=PAM_SUCCESS)    {
+	    pam_syslog(pamh,LOG_ERR,"Cannot store proxyname as pam data: %s\n",
+		pam_strerror(pamh,rc));
+	    free(proxy_buf);
+	    return PAM_AUTHINFO_UNAVAIL;
+	}
+	
+	/* Store proxy internal env */
+	if (opts->useenv)	{
+	    /* proxy */
+	    len=1+snprintf(buffer,0,"%s=%s",PAM_PROXY_FILENAME,cred->proxyfile);
+	    if ( (buffer=malloc(len))==NULL )
+		return PAM_AUTHINFO_UNAVAIL;
+	    snprintf(buffer,len,"%s=%s",PAM_PROXY_FILENAME,cred->proxyfile);
+	    rc=pam_putenv(pamh,buffer);
+	    free(buffer);
+	    if (rc!=PAM_SUCCESS)
+		return PAM_AUTHINFO_UNAVAIL;
+	}
     } else {
 	/* Memory based: store in pam items "myproxychain" and "myproxykey",
 	 * store chain first */
-	if ( (rc=pam_set_data(pamh, DATA_PROXY_CHAIN,
+	if ( (rc=pam_set_data(pamh, PAM_PROXY_CHAIN,
 			      (void*)cred->chain,
 			      _pam_chain_cleanup))!=PAM_SUCCESS)    {
 	    /* Chain failed */
 	    pam_syslog(pamh, LOG_ERR,
 		"Failed to pam_set_data proxy chain: %s\n",
 		pam_strerror(pamh,rc));
-	    rc=PAM_AUTHINFO_UNAVAIL;
-	} else if ( (rc=pam_set_data(pamh, DATA_PROXY_KEY,
+	    return PAM_AUTHINFO_UNAVAIL;
+	} else if ( (rc=pam_set_data(pamh, PAM_PROXY_KEY,
 			      (void*)cred->privkey,
 			      _pam_privkey_cleanup))!=PAM_SUCCESS)    {
 	    /* Key failed */
 	    pam_syslog(pamh, LOG_ERR,
 		"Failed to pam_set_data private key: %s\n",
 		pam_strerror(pamh,rc));
-	    rc=PAM_AUTHINFO_UNAVAIL;
+	    return PAM_AUTHINFO_UNAVAIL;
 	}
-	/* If we haven't stored them successfully: clear them */
-	if (rc!=PAM_SUCCESS)
-	    _myproxy_free_cred(cred);
     }
 
     return rc;
@@ -384,6 +376,9 @@ pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv) 
     int rc,prc;
     BIO *bio=NULL;
     char *errstr=NULL;
+
+    /* Initialize opts */
+    _pam_myproxy_config_init(&opts);
 
     /* Get commandline (and perhaps config file) options */
     if ( (rc=_pam_myproxy_parse_cmdline(argc,argv,&opts)) != 0)	{
@@ -428,6 +423,10 @@ pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv) 
     if (prc==PAM_SUCCESS)
 	prc=_store_proxy(pamh,&opts, &cred);
 
+    /* We're done with the credentials as we have it on disk now */
+    if (opts.writeproxy || prc!=PAM_SUCCESS)
+	_myproxy_free_cred(&cred);
+
     /* Cleanup opts */
     _pam_myproxy_config_free(&opts);
 
@@ -450,9 +449,12 @@ PAM_EXTERN int
 pam_sm_setcred(pam_handle_t *pamh, int flags, int argc, const char **argv) {
     pam_myproxy_opts_t opts;
     int len,prc,rc,myerrno;
-    char *buffer;
+    char *buffer,*proxy_buf;
     const char *proxy,*proxy_env;
     struct stat buf;
+
+    /* Initialize opts */
+    _pam_myproxy_config_init(&opts);
 
     /* Get commandline (and perhaps config file) options */
     if ( (rc=_pam_myproxy_parse_cmdline(argc,argv,&opts)) !=0 ) {
@@ -473,7 +475,7 @@ pam_sm_setcred(pam_handle_t *pamh, int flags, int argc, const char **argv) {
     /* First handle credential removal */
     if ( flags & PAM_DELETE_CRED )  {
 	/* First check we have a name */
-	rc=pam_get_data(pamh,DATA_PROXY_FILENAME,(const void **)&proxy);
+	rc=pam_get_data(pamh,PAM_PROXY_FILENAME,(const void **)&proxy);
 	if (rc==PAM_NO_MODULE_DATA) { /* Nothing to do */
 	    pam_syslog(pamh,LOG_DEBUG,"No proxy data found\n");
 	    return PAM_SUCCESS;
@@ -490,7 +492,9 @@ pam_sm_setcred(pam_handle_t *pamh, int flags, int argc, const char **argv) {
 	/* Try to stat it */
 	if (stat(proxy,&buf)==-1) { /* stat failed */
 	    myerrno=errno;
-	    if (myerrno==ENOENT)  /* does not exist: ok, but remove data */
+	    if (myerrno==ENOENT)
+		/* file does not exist: ok, but remove pam data as it no longer
+		 * valid */
 		prc=PAM_SUCCESS;
 	    else	{ /* unknown error */
 		pam_syslog(pamh,LOG_ERR,"Cannot stat proxy %s: %s\n",
@@ -508,7 +512,7 @@ pam_sm_setcred(pam_handle_t *pamh, int flags, int argc, const char **argv) {
 	}
 
 	/* Now unset the data entry, warn if fails, don't set the prc */
-	if ( (rc=pam_set_data(pamh, DATA_PROXY_FILENAME, NULL,
+	if ( (rc=pam_set_data(pamh, PAM_PROXY_FILENAME, NULL,
 			_pam_string_cleanup)) != PAM_SUCCESS){
 	    pam_syslog(pamh,LOG_WARNING,"Cannot unset proxy data: %s\n",
 		    pam_strerror(pamh, rc));
@@ -526,42 +530,41 @@ pam_sm_setcred(pam_handle_t *pamh, int flags, int argc, const char **argv) {
     }
 
     /* Remainder is credential setting */
-
-    /* Check if there is the special env variable: if so, (re)set the data
-     * entry */
-    if ( (proxy=pam_getenv(pamh, PAM_MYPROXY_ENVVAR)) != NULL) {
-	/* Copy output in buffer and put in cred data */
-	if ( (buffer=strdup(proxy))==NULL ) {
-	    pam_syslog(pamh,LOG_ERR,"Cannot set data for proxy %s\n", proxy);
+    /* Is is present in the environment to be retrieved? */
+    if (opts.useenv && (proxy=pam_getenv(pamh, PAM_PROXY_FILENAME))!=NULL) {
+	/* Copy for data and credentials */
+	if ( (proxy_buf=strdup(proxy))==NULL )	{
+	    pam_syslog(pamh,LOG_ERR,"Out of memory\n");
 	    return PAM_CRED_ERR;
 	}
-	/* Set data */
-	if ( (rc=pam_set_data(pamh, DATA_PROXY_FILENAME, (void *)buffer,
-			_pam_string_cleanup)) != PAM_SUCCESS) {
-	    pam_syslog(pamh,LOG_ERR,"Cannot set data for proxy %s: %s\n",
-		    proxy,pam_strerror(pamh,rc));
+	/* Store in data */
+	if ( (rc=pam_set_data(pamh,PAM_PROXY_FILENAME,
+			  proxy_buf,_pam_string_cleanup))!=PAM_SUCCESS )    {
+	    pam_syslog(pamh,LOG_ERR,"Cannot put %s in pam data: %s\n",
+		proxy_buf,pam_strerror(pamh,rc));
+	    free(proxy_buf);
 	    return PAM_CRED_ERR;
 	}
-	/* Unset environment variable */
-	if ( (rc=pam_putenv(pamh, PAM_MYPROXY_ENVVAR)) != PAM_SUCCESS)  {
-	    pam_syslog(pamh,LOG_ERR,"Cannot unset variable %s: %s\n",
-		    PAM_MYPROXY_ENVVAR,pam_strerror(pamh,rc));
+	/* Remove from env */
+	if ( (rc=pam_putenv(pamh,PAM_PROXY_FILENAME))!=PAM_SUCCESS )  {
+	    pam_syslog(pamh,LOG_ERR,"Cannot remove %s from pam env: %s\n",
+		PAM_PROXY_FILENAME,pam_strerror(pamh,rc));
 	    return PAM_CRED_ERR;
 	}
-    } else if ( (rc=pam_get_data(pamh, DATA_PROXY_FILENAME,
-		    (const void **)&proxy)) != PAM_SUCCESS ) {
-	/* Check it has already been set */
-	pam_syslog(pamh,LOG_ERR,"Proxy data not found: %s\n",
-		pam_strerror(pamh, rc));
-	return PAM_CRED_UNAVAIL;
+    } else if ( (rc=pam_get_data(pamh,PAM_PROXY_FILENAME,
+		    (const void **)&proxy)) !=PAM_SUCCESS) {
+	pam_syslog(pamh,LOG_ERR,"Cannot obtain proxy data: %s\n",
+		pam_strerror(pamh,rc));
+	return PAM_CRED_ERR;
     }
 
-    /* proxy is present as data, now set it in the pam environment for the user
-     * */
+    /* proxy is now present as data, now set it in the pam environment for the
+     * user */
     len=2+strlen(PROXY_ENV_VAR)+strlen(proxy);
-    if ( (buffer=(char *)malloc(len))==NULL )
+    if ( (buffer=(char *)malloc(len))==NULL )	{
+	pam_syslog(pamh,LOG_ERR,"Out of memory\n");
 	return PAM_CRED_ERR;
-    else {
+    } else {
 	snprintf(buffer,len,"%s=%s",PROXY_ENV_VAR,proxy);
 	if ( (rc=pam_putenv(pamh, buffer))!=PAM_SUCCESS )   {
 	    pam_syslog(pamh,LOG_ERR,"Cannot set data for proxy %s: %s\n",

@@ -101,11 +101,15 @@ int main(int argc, char *argv[])    {
 	return 1;
     }
 
+    /* Initialize opts */
+    _pam_myproxy_config_init(&opts);
+
     /* Set conffile */
-    if (argv[2])
-	opts.conffile=strdup(argv[2]);
-    else
-	opts.conffile=strdup(PAM_MYPROXY_CONF);
+    opts.conffile=(argv[2] ? strdup(argv[2]) : strdup(PAM_MYPROXY_CONF));
+    if (opts.conffile==NULL)	{
+	fprintf(stderr,"Out of memory\n");
+	return 1;
+    }
 
     /* Parse config file */
     switch (_pam_myproxy_parse_config(&opts)) {
@@ -150,7 +154,7 @@ int main(int argc, char *argv[])    {
 
     /* Write proxy when so far successful */
     if ( rc==PAM_MYPROXY_SUCCESS )  {
-	if (_myproxy_write_proxy(opts.proxyname,&cred))	{
+	if (_myproxy_write_proxy(opts.proxyfmt,&cred))	{
 	    fprintf(stderr,"Failed to write %s\n",
 		    cred.proxyfile ? cred.proxyfile : "(null)");
 	    prc=1;
@@ -163,10 +167,7 @@ int main(int argc, char *argv[])    {
     /* Cleanup opts */
     _pam_myproxy_config_free(&opts);
 
-    /* Free proxyfile */
-    free(cred.proxyfile);
-
-    /* Free remaining credentials */
+    /* Free credentials */
     _myproxy_free_cred(&cred);
 
     return prc;

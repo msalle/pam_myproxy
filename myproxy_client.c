@@ -636,11 +636,13 @@ void _myproxy_free_password(cred_t *cred)  {
 }
 
 /**
- * Cleans credential data, except for proxy filename. Password is explicitly
- * overwritten
+ * Cleans credential data. Password is explicitly overwritten
  * \param cred credential structure
  */
 void _myproxy_free_cred(cred_t *cred)  {
+    /* Cleanup proxyfile */
+    free(cred->proxyfile); cred->proxyfile=NULL;
+
     /* Cleanup password if not yet done */
     _myproxy_free_password(cred);
 

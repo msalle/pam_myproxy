@@ -145,17 +145,20 @@ static char *_conf_value(const char *buf, const char *option)   {
  * otherwise return default value
  * \param buf contains configuration
  * \param option option to look for
- * \param defval value to return when option cannot be found
- * \return value found as string or defval, NULL on memory error
+ * \param oldval current value, will be replaced if a new value is found
+ * \return 1 when value is found, otherwise 0
  */
-static char *_conf_val_str(const char *buf, const char *option,
-			   const char *defval) {
+static int _conf_val_str(const char *buf, const char *option,
+			 char **oldval) {
     char *value;
+    int rc=0;
 
-    if ( (value=_conf_value(buf, option)) == NULL )
-	value=defval ? strdup(defval) : NULL;
-
-    return value;
+    if ( (value=_conf_value(buf, option)) != NULL ) {
+	free(*oldval);
+	*oldval=value;
+	rc=1;
+    }
+    return rc;
 }
 
 /**
@@ -163,24 +166,21 @@ static char *_conf_val_str(const char *buf, const char *option,
  * to long, otherwise default
  * \param buf contains configuration
  * \param option option to look for
- * \param defval value to return when option cannot be found or converted to
- * long
- * \return value found or defval
+ * \param oldval current value, will be replaced if a new value is found
+ * \return 1 when new value is found, otherwise 0
  */
-static long _conf_val_long(const char *buf, const char *option,
-				   const long defval) {
-    char *strval;
-    long value=defval;
+static int _conf_val_long(const char *buf, const char *option, long *oldval) {
+    char *strval=NULL;
+    long value;
+    int rc=0;
 
-    if ( (strval=_conf_value(buf, option)) == NULL )
-	value=defval;
-    else    {
-	if ( (sscanf(strval,"%ld",&value)!=1 ) )
-	    value=defval;
-	free(strval);
+    if ( (strval=_conf_value(buf, option))!=NULL &&
+	 sscanf(strval,"%ld",&value)!=1 ) {
+	*oldval=value;
+	rc=1;
     }
-
-    return value;
+    free(strval);
+    return rc;
 }
 
 /**
@@ -188,31 +188,31 @@ static long _conf_val_long(const char *buf, const char *option,
  * to int, otherwise default
  * \param buf contains configuration
  * \param option option to look for
- * \param defval value to return when option cannot be found or converted to
- * int
- * \return value found or defval
+ * \param oldval current value, will be replaced if a new value is found
+ * \return 1 when new value is found, otherwise 0
  */
-static int _conf_val_int(const char *buf, const char *option,
-				   const int defval) {
-    char *strval;
-    int value=defval;
+static int _conf_val_int(const char *buf, const char *option, int *oldval) {
+    char *strval=NULL;
+    int value,rc=0;
 
-    if ( (strval=_conf_value(buf, option)) == NULL )
-	value=defval;
-    else    {
-	if ( (sscanf(strval,"%d",&value)!=1 ) )
-	    value=defval;
-	free(strval);
+    if ( (strval=_conf_value(buf, option))!=NULL &&
+	 sscanf(strval,"%d",&value)!=1 ) {
+	*oldval=value;
+	rc=1;
     }
-
-    return value;
+    free(strval);
+    return rc;
 }
+
+/************************************************************************/
+/* PUBLIC FUNCTIONS                                                     */
+/************************************************************************/
 
 /**
  * Initializes the options structure
  * \param opts configuration options structure 
  */
-static void _init_opts_struct(pam_myproxy_opts_t *opts)	{
+void _pam_myproxy_config_init(pam_myproxy_opts_t *opts)	{
     opts->conffile=NULL;
 
     opts->certinfo.cafile=opts->certinfo.capath=
@@ -221,15 +221,12 @@ static void _init_opts_struct(pam_myproxy_opts_t *opts)	{
     opts->endpoint.host=NULL;
     opts->endpoint.port=DEF_PORT;
 
-    opts->proxyname=strdup(DEF_FORMAT);
+    opts->proxyfmt=strdup(DEF_FORMAT);
     opts->writeproxy=DEF_WRITE;
     opts->lifetime=DEF_LIFETIME;
     opts->keysize=DEF_KEYSIZE;
+    opts->useenv=DEF_USEENV;
 }
-
-/************************************************************************
- * Public functions
- ************************************************************************/
 
 /**
  * free()s all memory contained in opts structure
@@ -245,7 +242,7 @@ void _pam_myproxy_config_free(pam_myproxy_opts_t *opts) {
 
     free(opts->endpoint.host);		opts->endpoint.host=NULL;
 
-    free(opts->proxyname);		opts->proxyname=NULL;
+    free(opts->proxyfmt);		opts->proxyfmt=NULL;
 }
 
 /**
@@ -264,20 +261,21 @@ int _pam_myproxy_parse_config(pam_myproxy_opts_t *opts) {
     if ( (rc=_read_conf_file(&buf, opts->conffile)) )
 	goto finalize;
 
-/*    opts->certinfo.CApath=_conf_val_str(buf,"CApath","/etc/grid-security/certificates");*/
-    opts->certinfo.capath=_conf_val_str(buf,"capath",NULL);
-    opts->certinfo.cafile=_conf_val_str(buf,"cafile",NULL);
-    opts->certinfo.clientcert=_conf_val_str(buf,"hostcert",NULL);
-    opts->certinfo.clientkey=_conf_val_str(buf,"hostkey",NULL);
+/*    opts->certinfo.CApath=_conf_val_str(buf,OPT_CAPATH,"/etc/grid-security/certificates");*/
+    _conf_val_str(buf,OPT_CAPATH,  &(opts->certinfo.capath));
+    _conf_val_str(buf,OPT_CAFILE,  &(opts->certinfo.cafile));
+    _conf_val_str(buf,OPT_HOSTCERT,&(opts->certinfo.clientcert));
+    _conf_val_str(buf,OPT_HOSTKEY, &(opts->certinfo.clientkey));
 
-    opts->endpoint.host=_conf_val_str(buf,"myproxyhost",NULL);
-    opts->endpoint.port=_conf_val_int(buf,"myproxyport",DEF_PORT);
+    _conf_val_str(buf,OPT_MYPROXYHOST,&(opts->endpoint.host));
+    _conf_val_int(buf,OPT_MYPROXYPORT,&(opts->endpoint.port));
 
-    opts->proxyname=_conf_val_str(buf,"proxyfmt",DEF_FORMAT);
-    opts->writeproxy=_conf_val_int(buf,"writeproxy",DEF_WRITE);
+    _conf_val_str(buf,OPT_PROXYFMT,&(opts->proxyfmt));
 
-    opts->lifetime=_conf_val_long(buf,"lifetime",DEF_LIFETIME);
-    opts->keysize=_conf_val_int(buf,"keysize",DEF_KEYSIZE);
+    _conf_val_int(buf, OPT_WRITEPROXY,&(opts->writeproxy));
+    _conf_val_long(buf,OPT_LIFETIME,  &(opts->lifetime));
+    _conf_val_int(buf, OPT_KEYSIZE,   &(opts->keysize));
+    _conf_val_int(buf, OPT_USEENV,    &(opts->useenv));
 
 finalize:
     free(buf);
@@ -298,11 +296,9 @@ finalize:
  */
 int _pam_myproxy_parse_cmdline(int argc, const char *argv[], 
 				pam_myproxy_opts_t *opts) {
-    int i,intval,longval,rc;
+    int i,intval,rc;
+    long longval;
     char *pos,*opt,*val;
-
-    /* Initialize opts */
-    _init_opts_struct(opts);
 
     /* Note: pam opts start at 0, not at 1 */
     for (i=0; i<argc; i++)  {
@@ -321,32 +317,32 @@ int _pam_myproxy_parse_cmdline(int argc, const char *argv[],
 	}
 
 	/* Look for right option */
-	if (strcmp(opt,"config")==0)    {
+	if (strcmp(opt,OPT_CONFIG)==0)    {
 	    _subst_val(&(opts->conffile),val);
 	    if ( (rc=_pam_myproxy_parse_config(opts))!=0)   {
 		free(opt);
 		return rc;
 	    }
-	} else if (strcmp(opt,"capath")==0)
+	} else if (strcmp(opt,OPT_CAPATH)==0)
 	    _subst_val(&(opts->certinfo.capath),val);
-	else if (strcmp(opt,"cafile")==0)
+	else if (strcmp(opt,OPT_CAFILE)==0)
 	    _subst_val(&(opts->certinfo.cafile),val);
-	else if (strcmp(opt,"hostcert")==0)
+	else if (strcmp(opt,OPT_HOSTCERT)==0)
 	    _subst_val(&(opts->certinfo.clientcert),val);
-	else if (strcmp(opt,"hostkey")==0)
+	else if (strcmp(opt,OPT_HOSTKEY)==0)
 	    _subst_val(&(opts->certinfo.clientkey),val);
-	else if (strcmp(opt,"myproxyhost")==0)
+	else if (strcmp(opt,OPT_MYPROXYHOST)==0)
 	    _subst_val(&(opts->endpoint.host),val);
-	else if (strcmp(opt,"myproxyport")==0) {
+	else if (strcmp(opt,OPT_MYPROXYPORT)==0) {
 	    if (sscanf(val,"%d",&intval)!=1)	{
 		free(val); free(opt);
 		return i+1;
 	    }
 	    opts->endpoint.port=intval;
 	    free(val);
-	} else if (strcmp(opt,"proxyfmt")==0)
-	    _subst_val(&(opts->proxyname),val);
-	else if (strcmp(opt,"writeproxy")==0)	{
+	} else if (strcmp(opt,OPT_PROXYFMT)==0)
+	    _subst_val(&(opts->proxyfmt),val);
+	else if (strcmp(opt,OPT_WRITEPROXY)==0)	{
 	    if (sscanf(val,"%d",&intval)!=1)	{
 		free(val); free(opt);
 		return i+1;
@@ -354,19 +350,26 @@ int _pam_myproxy_parse_cmdline(int argc, const char *argv[],
 	    opts->writeproxy=intval;
 	    free(val);
 	}
-	else if (strcmp(opt,"lifetime")==0) {
+	else if (strcmp(opt,OPT_LIFETIME)==0) {
 	    if (sscanf(val,"%ld",&longval)!=1)	{
 		free(val); free(opt);
 		return i+1;
 	    }
 	    opts->lifetime=longval;
 	    free(val);
-	} else if (strcmp(opt,"keysize")==0) {
+	} else if (strcmp(opt,OPT_KEYSIZE)==0) {
 	    if (sscanf(val,"%d",&intval)!=1)	{
 		free(val); free(opt);
 		return i+1;
 	    }
 	    opts->keysize=intval;
+	    free(val);
+	} else if (strcmp(opt,OPT_USEENV)==0) {
+	    if (sscanf(val,"%d",&intval)!=1)	{
+		free(val); free(opt);
+		return i+1;
+	    }
+	    opts->useenv=intval;
 	    free(val);
 	} else {
 	    free(val); free(opt);
