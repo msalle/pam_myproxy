@@ -53,6 +53,17 @@ typedef struct {
     int useenv;		    /* */
 } pam_myproxy_opts_t;
 
+/* Enum with all typical return values, to be mapped on proper pam-function
+ * return values */
+typedef enum {
+    MYPAM_SUCCESS       = 0,    /* success */
+    MYPAM_ERROR         = 1,    /* system error */
+    MYPAM_DATA_MISSING  = 2,    /* missing pam data */
+    MYPAM_USER_UNKNOWN  = 3,    /* username unknown */
+    MYPAM_CRED_EXPIRED  = 4,    /* credential expired */
+    MYPAM_AUTH_ERR      = 5,    /* credential invalid */
+} mypam_err_t;
+
 /************************************************************************/
 /* FUNCTION PROTOTYPES                                                  */
 /************************************************************************/
