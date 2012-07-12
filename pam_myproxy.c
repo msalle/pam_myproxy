@@ -188,6 +188,10 @@ static mypam_err_t _store_proxyfile(pam_handle_t *pamh, const char *filename,
 	return MYPAM_ERROR;
     }
 
+    /* Normally, proxyfile shouldn't be empty, check in any case */
+    if (cred->proxyfile==NULL)
+	return MYPAM_ERROR;
+
     /* Duplicate buffer */
     if ( (proxy_buf=strdup(cred->proxyfile))==NULL ) {
 	pam_syslog(pamh,LOG_ERR,"Out of memory\n");
@@ -260,6 +264,13 @@ static mypam_err_t _retrieve_proxyfile(pam_handle_t *pamh, cred_t *cred)    {
 		    pam_strerror(pamh,rc));
 	    return MYPAM_DATA_MISSING;
     }
+
+    /* proxy_buf can be set but empty: no error, but don't strdup! */
+    if (proxy_buf==NULL)    {
+	cred->proxyfile=NULL;
+	return MYPAM_SUCCESS;
+    }
+
     /* Put in credentials */
     if ( (cred->proxyfile=strdup(proxy_buf))==NULL )	{
 	pam_syslog(pamh,LOG_ERR,"Out of memory\n");
@@ -354,7 +365,11 @@ static mypam_err_t _remove_proxy(pam_handle_t *pamh, cred_t *cred)  {
     mypam_err_t prc;
     const char *proxy_env;
     struct stat buf;
-    
+  
+    /* Remove file only if a name has been set */
+    if (cred->proxyfile==NULL)
+	return MYPAM_SUCCESS;
+   
     /* Try to stat it */
     if (stat(cred->proxyfile,&buf)==-1) { /* stat failed */
 	myerrno=errno;
@@ -715,8 +730,8 @@ static mypam_err_t _pam_delete_cred(pam_handle_t *pamh,
     if ( (prc=_retrieve_proxyfile(pamh,&cred))!=MYPAM_SUCCESS)
 	goto _delete_cred_cleanup;
 
-    /* data entry found, try to remove it. In any case remove the data
-     * entry as it will no longer be valid */
+    /* data entry found (although could be empty) try to remove it. In any case
+     * remove the data entry as it will no longer be valid */
     prc=_remove_proxy(pamh, &cred);
 
 _delete_cred_cleanup:
